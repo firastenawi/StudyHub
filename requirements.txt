@@ -1,0 +1,10 @@
+PyQt6>=6.5
+PyQt6-WebEngine>=6.5   # web pages inside windows (optional: without it you get "open in browser")
+qrcode>=7.4            # QR code for pairing the phone
+markdown-it-py>=3.0    # note preview
+mdit-py-plugins>=0.4   # note preview: math, footnotes
+Pygments>=2.17         # code highlighting in notes
+paramiko>=3.4          # infra plugin: SSH
+cryptography>=42       # password vault, phone link certificates
+psutil>=5.9            # system widget, battery, VPN adapters
+pywinpty>=2.0          # terminal (ConPTY)
