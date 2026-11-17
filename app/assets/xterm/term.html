@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="xterm.css">
+<style>
+  html, body { margin: 0; height: 100%; background: var(--bg, #0a0d14); overflow: hidden; }
+  #term { position: absolute; inset: 6px 4px 4px 10px; }
+  .xterm-viewport::-webkit-scrollbar { width: 8px; }
+  .xterm-viewport::-webkit-scrollbar-thumb { background: rgba(140,149,168,.35); border-radius: 4px; }
+</style>
+<script src="xterm.js"></script>
+<script src="addon-fit.js"></script>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+</head>
+<body>
+<div id="term"></div>
+<script>
+// The terminal screen. Keys go to the program through the bridge (Python + Windows ConPTY), its output comes back.
+let term, fit, bridge;
+function resize() {
+  try { fit.fit(); } catch (e) {}
+  if (bridge) bridge.resize(term.cols, term.rows);
+}
+new QWebChannel(qt.webChannelTransport, ch => {
+  bridge = ch.objects.bridge;
+  const t = JSON.parse(bridge.theme);
+  document.body.style.setProperty("--bg", t.background);
+  term = new Terminal({
+    fontFamily: '"Cascadia Mono", "Cascadia Code", Consolas, monospace', fontSize: t.fontSize || 14,
+    cursorBlink: true, allowProposedApi: true, scrollback: 10000, theme: t, macOptionIsMeta: true,
+  });
+  fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById("term"));
+  // Windows Terminal habits: Ctrl+C copies when something is selected, Ctrl+V / Ctrl+Shift+V paste
+  term.attachCustomKeyEventHandler(ev => {
+    if (ev.type !== "keydown") return true;
+    const k = ev.key.toLowerCase();
+    if (ev.ctrlKey && k === "c" && (ev.shiftKey || term.hasSelection())) { bridge.copy(term.getSelection()); term.clearSelection(); return false; }
+    if (ev.ctrlKey && k === "v") { bridge.paste(); return false; }
+    if (ev.ctrlKey && (k === "=" || k === "+")) { term.options.fontSize += 1; resize(); return false; }
+    if (ev.ctrlKey && k === "-") { term.options.fontSize = Math.max(8, term.options.fontSize - 1); resize(); return false; }
+    return true;
+  });
+  term.onData(d => bridge.input(d));
+  term.element.addEventListener("contextmenu", ev => {  // right click: copy the selection, or paste
+    ev.preventDefault();
+    if (term.hasSelection()) { bridge.copy(term.getSelection()); term.clearSelection(); } else bridge.paste();
+  });
+  bridge.output.connect(d => term.write(d));
+  bridge.focus_request.connect(() => term.focus());
+  new ResizeObserver(resize).observe(document.getElementById("term"));
+  resize();
+  term.focus();
+  bridge.ready(term.cols, term.rows);
+});
+</script>
+</body>
+</html>
