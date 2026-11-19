@@ -15,7 +15,24 @@ Arabic and English, dark and light themes.
 - **Terminal**: PowerShell, CMD, WSL and SSH in tabs, split panes, snippets
 - **Files**: file explorer, tags, a Downloads organizer
 - **Tools**: clipboard history, screenshots with OCR, password vault, command palette (`Ctrl+Alt+K`)
-- **Phone link**: send notes, files and links between the laptop and your phone over Wi-Fi (Android app included)
+- **Phone link**: your Android phone and the laptop working together over Wi-Fi (see below)
+
+## Your phone
+
+The Android app comes with the installer: turn on Phone link, then open the 📲 button on the phone page to get
+the app and pair it with the code on the laptop. Everything stays on your own Wi-Fi.
+
+- **Phone › Home**: battery, notifications (reply, mark as read, mute an app), Do Not Disturb, torch, ringer,
+  volume, Find my phone
+- **Phone apps** in their own windows on the laptop, and **typing on the phone** with the laptop keyboard
+- **Camera to laptop**: a photo straight to the clipboard, or a page scan that comes out flat and clean (PDF too)
+- **Sync & backup**: photos and videos backed up by year and month, folders kept in sync, transfers that pick up
+  where they stopped, links opened on the other device (YouTube at the same second)
+- **Deck**: a grid of buttons on the phone for the laptop: media and volume, shortcuts, apps, Study Hub commands,
+  OBS Studio, lock / sleep. Plus a touchpad, air mouse and a laser pointer for slides
+
+Mirroring and phone apps in windows need [scrcpy](https://github.com/Genymobile/scrcpy) and wireless debugging on
+the phone (Phone › Phone screen walks you through it). OBS buttons need OBS 28+ with its WebSocket server on.
 
 ## Install
 
