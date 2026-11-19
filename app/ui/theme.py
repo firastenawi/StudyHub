@@ -92,6 +92,20 @@ class Theme:
 
 class Icons:
     HOME = ""
+    # phone dashboard
+    MOON = ""
+    FLASHLIGHT = ""
+    WIFI = ""
+    BLUETOOTH = ""
+    RINGER = ""
+    VIBRATE = ""
+    MUTE = ""
+    BATTERY = ""
+    CHARGING = ""
+    SEND = ""
+    REPLY = ""
+    MORE = ""
+    CAMERA = ""
     STUDY = ""
     FOLDER = ""
     OPEN_FOLDER = ""

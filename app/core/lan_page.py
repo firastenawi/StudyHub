@@ -219,6 +219,20 @@ background:linear-gradient(135deg,#12a59433,#22d3ee18);border:1px solid #12a5948
 .labbar .hx{flex:1;min-width:0}.labbar b{display:block;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .labbar small{color:var(--dim);font-size:12px}.labbar .go{flex:none;border:0;border-radius:12px;padding:10px 14px;font:inherit;
 font-size:14px;font-weight:600;color:#fff;background:linear-gradient(135deg,#12a594,#0e7490)}
+.hx-later{flex:none;border:0;background:none;color:var(--dim);font:inherit;font-size:12px;padding:6px}
+.camrow{display:flex;gap:8px;margin:10px 0 2px}.camrow button{flex:1;border:1px solid var(--line);border-radius:12px;
+background:var(--card);color:var(--text);font:inherit;font-size:13px;padding:10px 8px}
+.cam .scanframe{position:absolute;left:8%;right:8%;top:14%;bottom:30%;border:2px dashed #ffffffaa;border-radius:10px;pointer-events:none}
+.deckgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:6px}
+.deckb{position:relative;aspect-ratio:1;border:0;border-radius:18px;color:#fff;font:inherit;display:flex;flex-direction:column;
+align-items:center;justify-content:center;gap:6px;padding:6px;box-shadow:inset 0 0 0 1px #ffffff1a;transition:transform .08s}
+.deckb:active{transform:scale(.94)}.deckb .e{font-size:30px;line-height:1}.deckb .l{font-size:12px;font-weight:600;
+max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.deckb.on{box-shadow:inset 0 0 0 3px #fff}.deckb .lvl{position:absolute;left:10px;right:10px;bottom:8px;height:4px;
+border-radius:2px;background:#ffffff33;overflow:hidden}.deckb .lvl i{display:block;height:100%;background:#fff}
+.airbtn{width:100%;margin-top:10px;border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--text);
+font:inherit;font-size:15px;padding:16px;touch-action:none;user-select:none}
+.airbtn.on{border-color:var(--accent);background:#7c5cff33}
 .labdot{width:10px;height:10px;border-radius:50%;background:#ef4444;flex:none;animation:blink 1.4s infinite}
 @keyframes blink{50%{opacity:.25}}
 .cam{position:fixed;inset:0;z-index:60;background:#000;display:flex;flex-direction:column}
@@ -260,6 +274,12 @@ background:linear-gradient(#000a,#0000);color:#fff;font-size:14px}
   </section>
 
   <main id="mainView" class="hidden">
+   <div id="accessBar" class="labbar hidden">
+     <div class="hx"><b data-t="accTitle"></b><small id="accText"></small></div>
+     <button class="go" id="accBtn"></button>
+     <button class="hx-later" id="accLater"></button>
+   </div>
+   <div id="syncBars"></div>
    <div id="labBar" class="labbar hidden">
      <span class="labdot"></span>
      <div class="hx"><b id="labTitle"></b><small data-t="labRunning"></small></div>
@@ -269,6 +289,7 @@ background:linear-gradient(#000a,#0000);color:#fff;font-size:14px}
    <div id="cam" class="cam hidden">
      <video id="camVideo" playsinline autoplay muted></video>
      <div class="flash" id="camFlash"></div>
+     <div class="scanframe hidden" id="camFrame"></div>
      <div class="top"><button class="round" id="camClose" aria-label="close">✕</button><b id="camTitle"></b>
        <button class="round" id="camFlip" aria-label="flip">⟲</button></div>
      <div class="bottom">
@@ -311,6 +332,7 @@ background:linear-gradient(#000a,#0000);color:#fff;font-size:14px}
         <button class="drop" id="camBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><b data-t="camera"></b></button>
         <button class="drop" id="pickBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h6l2 2h8v11H4z"/></svg><b data-t="pick"></b></button>
       </div>
+      <div class="camrow"><button id="toClipPhoto"></button><button id="toClipScan"></button></div>
       <input id="camInput" type="file" accept="image/*" capture="environment" class="hidden">
       <input id="fileInput" type="file" multiple class="hidden">
       <ul class="files" id="fileList"></ul>
@@ -400,9 +422,14 @@ background:linear-gradient(#000a,#0000);color:#fff;font-size:14px}
    </div>
 
    <div data-sec-pane="ctrl" class="hidden">
-     <div class="seg" data-seg="ctrl"><button data-v="slides" data-t="cSlides"></button><button data-v="pad" data-t="cPad"></button><button data-v="keys" data-t="cKeys"></button><button data-v="screen" data-t="cScreen"></button></div>
-     <div data-seg-pane="ctrl:slides">
+     <div class="seg" data-seg="ctrl"><button data-v="deck" data-t="cDeck"></button><button data-v="slides" data-t="cSlides"></button><button data-v="pad" data-t="cPad"></button><button data-v="keys" data-t="cKeys"></button><button data-v="screen" data-t="cScreen"></button></div>
+     <div data-seg-pane="ctrl:deck">
+       <div class="deckgrid" id="deckGrid"></div>
+       <div class="lbl" id="deckHint"></div>
+     </div>
+     <div data-seg-pane="ctrl:slides" class="hidden">
        <div class="row" dir="ltr"><button class="big" data-key="prev">‹</button><button class="big" data-key="next">›</button></div>
+       <button class="airbtn" id="laserBtn"></button>
        <div class="g3"><button class="k" data-key="start_show" data-t="startShow"></button><button class="k" data-key="start_here" data-t="startHere"></button><button class="k" data-key="end_show" data-t="endShow"></button>
          <button class="k" data-key="black" data-t="black"></button><button class="k" data-key="white" data-t="white"></button><button class="k" data-key="fullscreen">F11</button></div>
        <div class="lbl" data-t="media"></div>
@@ -413,6 +440,7 @@ background:linear-gradient(#000a,#0000);color:#fff;font-size:14px}
      <div data-seg-pane="ctrl:pad" class="hidden">
        <div class="pad" id="pad"><span data-t="padHint"></span></div>
        <div class="row mt"><button class="k" id="lClick" data-t="lClick"></button><button class="k" id="rClick" data-t="rClick"></button></div>
+       <button class="airbtn" id="airBtn"></button>
      </div>
      <div data-seg-pane="ctrl:keys" class="hidden">
        <div class="field"><textarea id="typeText" dir="auto" style="min-height:110px"></textarea></div>
@@ -518,6 +546,15 @@ const T = {
   labRunning:"مختبر شغّال — الصور بتروح للتقرير", labPhoto:"📷 صوّر", camCaption:"تعليق قصير (اختياري)…",
   camSent:"{n} انبعتوا للتقرير", camNoCam:"ما قدرت افتح الكاميرا — رح افتح كاميرا الموبايل", camFail:"ما انبعتت الصورة، جرّب كمان مرة",
   labEnded:"المختبر خلص",
+  cDeck:"الأزرار", deckHint:"رتّب الأزرار من اللابتوب: الموبايل › الأزرار.", deckEmpty:"ما في أزرار لسا — ضيفهم من اللابتوب: الموبايل › الأزرار.",
+  deckSleep:"تنيّم اللابتوب؟", airHold:"🎯 اكبس وطوّل وحرّك الموبايل لتحرّك الماوس", laserHold:"🔴 ليزر: اكبس وطوّل وأشّر بالموبايل",
+  airNo:"هالموبايل ما فيه حسّاس حركة", deckFail:"ما زبط عاللابتوب",
+  toClipPhoto:"📷 صورة لحافظة اللابتوب", toClipScan:"📄 امسح ورقة للابتوب",
+  camPhotoTitle:"صورة لحافظة اللابتوب", camScanTitle:"امسح ورقة — خليها كلها جوّا الإطار",
+  camPhotoSent:"صارت الصورة بحافظة اللابتوب ✓", camScanSent:"انبعتت — كمّل المسح عاللابتوب ✓",
+  accTitle:"الموبايل على اللابتوب", accNotif:"اسمح بالإشعارات لتشوفها وترد عليها من اللابتوب.", accDnd:"اسمح بعدم الإزعاج لتتحكم فيه وبالصامت من اللابتوب.",
+  accAllow:"اسمح", syncMedia:"اسمح بالصور والفيديوهات ليشتغل نسخ الصور عاللابتوب.", syncTitle:"نسخ ومزامنة",
+  syncPick:"اختار مجلد الموبايل لـ «{n}»", syncPickBtn:"اختار", syncPickHint:"المجلد يلي اخترته رح يضل نفس مجلد اللابتوب.", accType:"شغّل «الكتابة من اللابتوب» لتكتب بخانات الموبايل من كيبورد اللابتوب.", accLater:"بعدين",
   hoPdf:"كمّل القراءة", hoNote:"كمّل الملاحظة", hoPage:"صفحة {n}", openHere:"افتح هون", toLaptopPdf:"💻 كمّل عاللابتوب",
   sentLaptop:"صار جاهز عاللابتوب — اكبس 📱 بالشريط العلوي", hoSecure:"صفحات الـ PDF بتنعرض بس بالتطبيق الآمن (📲)",
   stNext:"المحاضرة الجاية", stTasks:"مهام اليوم", stServers:"السيرفرات", stLaptop:"اللابتوب", stNoClass:"ما في محاضرات اليوم",
@@ -571,6 +608,15 @@ const T = {
   labRunning:"Lab running — photos go into the report", labPhoto:"📷 Photo", camCaption:"Short caption (optional)…",
   camSent:"{n} sent to the report", camNoCam:"Couldn't open the camera — using the phone's camera app", camFail:"The photo didn't send, try again",
   labEnded:"The lab ended",
+  cDeck:"Deck", deckHint:"Set the buttons up on the laptop: Phone › Deck.", deckEmpty:"No buttons yet: add them on the laptop, Phone › Deck.",
+  deckSleep:"Put the laptop to sleep?", airHold:"🎯 Hold and move the phone to move the pointer", laserHold:"🔴 Laser: hold and point the phone",
+  airNo:"This phone has no motion sensor", deckFail:"That didn't work on the laptop",
+  toClipPhoto:"📷 Photo to laptop clipboard", toClipScan:"📄 Scan a page to the laptop",
+  camPhotoTitle:"Photo to the laptop clipboard", camScanTitle:"Scan a page: keep all of it inside the frame",
+  camPhotoSent:"The photo is on the laptop's clipboard ✓", camScanSent:"Sent: finish the scan on the laptop ✓",
+  accTitle:"Your phone on the laptop", accNotif:"Allow notification access to see and answer them on the laptop.", accDnd:"Allow Do Not Disturb access to control it (and silent mode) from the laptop.",
+  accAllow:"Allow", syncMedia:"Allow photos and videos so photo backup to the laptop can run.", syncTitle:"Backup & sync",
+  syncPick:"Choose the phone folder for “{n}”", syncPickBtn:"Choose", syncPickHint:"The folder you pick stays the same as the laptop's.", accType:"Turn on “Type from laptop” to type into the phone's text boxes with the laptop keyboard.", accLater:"Later",
   hoPdf:"Continue reading", hoNote:"Continue the note", hoPage:"page {n}", openHere:"Open here", toLaptopPdf:"💻 Continue on laptop",
   sentLaptop:"Ready on the laptop — click 📱 in its top bar", hoSecure:"PDF pages show only in the secure app (📲)",
   stNext:"Next class", stTasks:"Today's tasks", stServers:"Servers", stLaptop:"Laptop", stNoClass:"No more classes today",
@@ -593,6 +639,8 @@ function applyLang(){
   const ns = document.getElementById("noteSearch"); if (ns) ns.placeholder = t("notesSearch");
   const cs = document.getElementById("clipSearch"); if (cs) cs.placeholder = t("clipSearch");
   $("#langBtn").textContent = t("lang"); $("#limit").textContent = t("limit", INFO.max_mb);
+  $("#toClipPhoto").textContent = t("toClipPhoto"); $("#toClipScan").textContent = t("toClipScan");
+  $("#airBtn").textContent = t("airHold"); $("#laserBtn").textContent = t("laserHold");
   fillSubjects(); renderHistory(); renderInbox(); setStatus(window._online);
 }
 function toast(msg, kind){
@@ -821,8 +869,49 @@ const secOn = s => s === "send" || (s === "desk" ? caps.desktop : s === "files" 
                                     : s === "media" ? caps.sound : (caps.screen || caps.remote));
 const secLocked = s => (caps.need_https || []).some(k => (s === "files" && k === "files") || (s === "media" && k === "sound")
                                                        || (s === "ctrl" && (k === "screen" || k === "remote")));
+function renderAccess(){
+  const app = window.StudyHubApp;
+  if (!app || !app.phoneAccess || !caps.status){ $("#accessBar").classList.add("hidden"); return; }
+  let a = {}; try { a = JSON.parse(app.phoneAccess()); } catch(e){}
+  let later = {}; try { later = JSON.parse(store.get("sh_acc_later") || "{}"); } catch(e){}
+  const need = !a.notif ? "notif" : !a.dnd ? "dnd" : (!a.type && !later.type) ? "type" : "";
+  $("#accessBar").classList.toggle("hidden", !need);
+  if (!need) return;
+  $("#accText").textContent = t({notif: "accNotif", dnd: "accDnd", type: "accType"}[need]);
+  $("#accBtn").textContent = t("accAllow");
+  $("#accBtn").onclick = () => app.openAccess(need);
+  const lb = $("#accLater");  // typing is optional: it can wait (the laptop asks again when you use it)
+  lb.classList.toggle("hidden", need !== "type"); lb.textContent = t("accLater");
+  lb.onclick = () => { later.type = 1; store.set("sh_acc_later", JSON.stringify(later)); renderAccess(); };
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) renderAccess(); });
+let syncConf = null, syncAt = 0;
+async function renderSync(force){  // in the app only: photo access + the phone folder for new synced folders
+  const app = window.StudyHubApp, box = $("#syncBars");
+  if (!app || !app.pickFolder || !caps.sync){ box.innerHTML = ""; return; }
+  if (force || !syncConf || Date.now() - syncAt > 30000){
+    try { const r = await api("/api/sync/config"); if (r.status === 200){ syncConf = r.body; syncAt = Date.now(); } } catch(e){}
+  }
+  if (!syncConf) return;
+  let linked = []; try { linked = JSON.parse(app.linkedFolders()); } catch(e){}
+  box.innerHTML = "";
+  const bar = (title, text, btn, fn) => {
+    const d = document.createElement("div"); d.className = "labbar";
+    d.innerHTML = `<div class="hx"><b></b><small></small></div><button class="go"></button>`;
+    d.querySelector("b").textContent = title; d.querySelector("b").style.whiteSpace = "normal";
+    d.querySelector("small").textContent = text;
+    d.querySelector("button").textContent = btn; d.querySelector("button").onclick = fn; box.append(d);
+  };
+  if (syncConf.backup && syncConf.backup.on && !app.mediaAccess()) bar(t("syncTitle"), t("syncMedia"), t("accAllow"), () => app.requestMedia());
+  for (const f of syncConf.folders || [])
+    if (!linked.includes(f.id)) bar(t("syncPick", f.name), t("syncPickHint"), t("syncPickBtn"), () => app.pickFolder(f.id));
+}
+window.renderSync = renderSync;
+document.addEventListener("visibilitychange", () => { if (!document.hidden) renderSync(true); });
 function applyCaps(c){
   caps = c || {};
+  renderAccess();
+  renderSync();
   $$(".nav button").forEach(b => { const s = b.dataset.sec;
     b.classList.toggle("hidden", !secOn(s) && !secLocked(s)); b.classList.toggle("locked", !secOn(s) && secLocked(s)); });
   $$('[data-seg="ctrl"] button').forEach(b => b.classList.toggle("hidden", b.dataset.v === "screen" ? !caps.screen : !caps.remote));
@@ -841,9 +930,9 @@ function showSec(s){
     ctrl: () => segShow("ctrl", firstCtrl())})[s]?.();
 }
 function firstCtrl(){
-  const want = store.get("sh_seg_ctrl") || "slides";
+  const want = store.get("sh_seg_ctrl") || "deck";
   const btn = $(`[data-seg="ctrl"] [data-v="${want}"]`);
-  return btn && !btn.classList.contains("hidden") ? want : (caps.remote ? "slides" : "screen");
+  return btn && !btn.classList.contains("hidden") ? want : (caps.remote ? "deck" : "screen");
 }
 function renderLocked(){
   $("#lockedText").textContent = t("lockedText"); const go = $("#lockedGo"); go.innerHTML = "";
@@ -863,7 +952,7 @@ function segShow(group, v){
   $$(`[data-seg-pane^="${group}:"]`).forEach(p => p.classList.toggle("hidden", p.dataset.segPane !== group + ":" + v));
   if (group === "study") ({tasks: loadTasks, notes: loadNotes})[v]?.();
   if (group === "media" && v === "music") loadMusic();
-  if (group === "ctrl"){ if (v === "screen") startScreen(); }
+  if (group === "ctrl"){ if (v === "screen") startScreen(); if (v === "deck") loadDeck(); }
 }
 $$("[data-seg] button").forEach(b => b.onclick = () => segShow(b.closest("[data-seg]").dataset.seg, b.dataset.v));
 $$(".nav button").forEach(b => b.onclick = () => showSec(b.dataset.sec));
@@ -883,7 +972,10 @@ $("#sheet").onclick = e => { if (e.target.id === "sheet") closeSheet(); };
 async function onEvents(list){
   if (!list.length) return;
   const newest = Math.max(...list.map(e => e.seq));
-  if (lastEv) for (const ev of list) if (ev.text) notify((ev.kind === "outbox" ? t("evOutbox") + ": " : "⏱ ") + ev.text);
+  if (lastEv) for (const ev of list){
+    if (ev.kind === "camera"){ if (!document.hidden) camRequest(ev.text); continue; }
+    if (ev.text) notify((ev.kind === "outbox" ? t("evOutbox") + ": " : "⏱ ") + ev.text);
+  }
   lastEv = newest; store.set("sh_ev", String(lastEv));
 }
 async function notify(text){
@@ -1515,13 +1607,14 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden && to
   if (await ping() || token) showMain();  // offline: keep the forms, the status dot says so
   appSession();
   const open = location.hash.match(/open=(\w+)/);  // the app's shortcuts: #open=stand / ctrl / media / study
-  if (open){ window.history.replaceState(null, "", location.pathname); if (open[1] === "stand") openStand(); else showSec(open[1]); }
+  if (open){ window.history.replaceState(null, "", location.pathname);
+    if (open[1] === "stand") openStand(); else if (open[1].startsWith("cam")) camRequest(open[1].slice(3)); else showSec(open[1]); }
   const sec = store.get("sh_sec"); if (!open && sec && sec !== "send" && !location.search.includes("share=1")) showSec(sec);
   processShare();
 })();
 
 // ---------------------------------------------------------------- lab running: photos straight into the report
-let lab = {}, cam = {stream: null, facing: "environment", sent: 0};
+let lab = {}, cam = {stream: null, facing: "environment", sent: 0, mode: "lab"};  // mode: lab | photo | scan
 function renderLab(l){
   lab = l || {};
   $("#labBar").classList.toggle("hidden", !lab.title);
@@ -1542,14 +1635,36 @@ function sendLabPhoto(blob, name){
     else toast(t("camFail"), "bad");
   });
 }
+function sendCameraShot(blob, name){  // photo / scan for the laptop: one shot, then the camera closes
+  const f = {file: new File([blob], name, {type: blob.type || "image/jpeg"}), progress: 0, el: {fill: {style: {}}}};
+  const mode = cam.mode;
+  upload(f, null, {"X-Camera": mode}).then(status => {
+    if (status === 200){ toast(t(mode === "scan" ? "camScanSent" : "camPhotoSent"), "ok"); if (navigator.vibrate) navigator.vibrate(30); }
+    else toast(t("camFail"), "bad");
+  });
+  closeCam();
+}
+function camRequest(mode){  // the laptop asked for a photo / scan (or a button here)
+  if (!["photo", "scan"].includes(mode)) return;
+  if (!$("#cam").classList.contains("hidden") && cam.mode === mode) return;
+  if (!$("#cam").classList.contains("hidden")) closeCam();
+  openCam(mode);
+}
+window.camRequest = camRequest;
 async function startStream(){
   if (cam.stream) cam.stream.getTracks().forEach(tr => tr.stop());
-  cam.stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: cam.facing, width: {ideal: 1920}, height: {ideal: 1080}}, audio: false});
+  const big = cam.mode !== "lab";  // photos and scans: as sharp as the camera allows
+  cam.stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: cam.facing,
+    width: {ideal: big ? 4096 : 1920}, height: {ideal: big ? 3072 : 1080}}, audio: false});
   $("#camVideo").srcObject = cam.stream;
 }
-async function openCam(){
+async function openCam(mode){
+  cam.mode = typeof mode === "string" ? mode : "lab";
   if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)){ $("#labCapture").click(); return; }  // plain http: the camera app
-  $("#cam").classList.remove("hidden"); $("#camTitle").textContent = lab.title || "";
+  $("#cam").classList.remove("hidden");
+  $("#camTitle").textContent = cam.mode === "lab" ? (lab.title || "") : t(cam.mode === "scan" ? "camScanTitle" : "camPhotoTitle");
+  $("#camCaption").classList.toggle("hidden", cam.mode !== "lab");
+  $("#camFrame").classList.toggle("hidden", cam.mode !== "scan");
   $("#camCaption").placeholder = t("camCaption"); $("#camCount").textContent = cam.sent ? t("camSent", cam.sent) : "";
   try { await startStream(); }
   catch(err){ closeCam(); toast(t("camNoCam"), "bad"); $("#labCapture").click(); }
@@ -1558,7 +1673,9 @@ function closeCam(){
   if (cam.stream) cam.stream.getTracks().forEach(tr => tr.stop());
   cam.stream = null; $("#cam").classList.add("hidden"); $("#camShots").innerHTML = ""; cam.sent = 0;
 }
-$("#labCamBtn").onclick = openCam;
+$("#labCamBtn").onclick = () => openCam("lab");
+$("#toClipPhoto").onclick = () => camRequest("photo");
+$("#toClipScan").onclick = () => camRequest("scan");
 $("#camClose").onclick = closeCam;
 $("#camFlip").onclick = () => { cam.facing = cam.facing === "environment" ? "user" : "environment"; startStream().catch(() => toast(t("camNoCam"), "bad")); };
 $("#camShutter").onclick = () => {
@@ -1568,17 +1685,74 @@ $("#camShutter").onclick = () => {
   const fl = $("#camFlash"); fl.style.transition = "none"; fl.style.opacity = ".8";
   requestAnimationFrame(() => { fl.style.transition = "opacity .25s"; fl.style.opacity = "0"; });
   const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
-  c.toBlob(b => b && sendLabPhoto(b, `lab-${stamp}.jpg`), "image/jpeg", 0.9);
+  if (cam.mode === "lab") c.toBlob(b => b && sendLabPhoto(b, `lab-${stamp}.jpg`), "image/jpeg", 0.9);
+  else c.toBlob(b => b && sendCameraShot(b, `${cam.mode}-${stamp}.jpg`), "image/jpeg", 0.95);
 };
 $("#camCaption").onkeydown = e => { if (e.key === "Enter") $("#camShutter").click(); };
 $("#labCapture").onchange = e => {  // fallback: the phone's camera app, one photo at a time
   const file = e.target.files[0]; e.target.value = ""; if (!file) return;
   const f = {file, progress: 0, el: {fill: {style: {}}}};
-  upload(f, null, {"X-Lab": "1"}).then(status => {
-    if (status === 200) toast(t("camSent", 1), "ok");
+  const head = cam.mode === "lab" ? {"X-Lab": "1"} : {"X-Camera": cam.mode};
+  upload(f, null, head).then(status => {
+    if (status === 200) toast(cam.mode === "lab" ? t("camSent", 1) : t(cam.mode === "scan" ? "camScanSent" : "camPhotoSent"), "ok");
     else toast(t("camFail"), "bad");
   });
 };
+
+// ---------------------------------------------------------------- control: the Deck (set up on the laptop)
+let deckTimer = 0;
+function deckVisible(){ return section === "ctrl" && (segs.ctrl || "deck") === "deck" && !document.hidden; }
+function renderDeck(d){
+  const g = $("#deckGrid"); g.innerHTML = "";
+  for (const b of d.buttons || []){
+    const el = document.createElement("button"); el.className = "deckb" + (b.on ? " on" : "");
+    el.style.background = `linear-gradient(145deg, ${b.color}, ${b.color}aa)`;
+    el.innerHTML = `<span class="e"></span><span class="l"></span>`;
+    el.querySelector(".e").textContent = b.emoji; el.querySelector(".l").textContent = b.label;
+    if (d.volume && b.kind === "media" && /vol|🔊|🔉/.test(b.emoji)){
+      const lv = document.createElement("span"); lv.className = "lvl"; lv.innerHTML = `<i style="width:${d.volume.level}%"></i>`; el.append(lv);
+    }
+    el.onclick = () => pressDeck(b);
+    g.append(el);
+  }
+  $("#deckHint").textContent = (d.buttons || []).length ? t("deckHint") : t("deckEmpty");
+}
+async function loadDeck(){
+  clearTimeout(deckTimer);
+  if (!caps.remote) return;
+  try { const r = await api("/api/deck"); if (r.status === 200) renderDeck(r.body); } catch(e){}
+  if (deckVisible()) deckTimer = setTimeout(loadDeck, 4000);  // live volume / mute / OBS
+}
+async function pressDeck(b){
+  if (b.confirm && !confirm(t("deckSleep"))) return;
+  buzz(18);
+  const r = await post("/api/deck/press", {id: b.id}).catch(() => null);
+  if (r && r.status === 200) renderDeck(r.body); else toast((r && r.body && r.body.error && r.body.error.length < 60) ? r.body.error : t("deckFail"), "bad");
+}
+
+// ---------------------------------------------------------------- air mouse / laser: hold and move the phone
+let air = {on: false, dx: 0, dy: 0, last: 0, laser: false};
+function airMotion(e){
+  if (!air.on) return;
+  const r = e.rotationRate; if (!r) return;
+  const now = performance.now(), dt = air.last ? Math.min(60, now - air.last) / 1000 : 0; air.last = now;
+  const k = air.laser ? 22 : 16;  // degrees turned -> pixels
+  air.dx += -(r.alpha || 0) * dt * k; air.dy += -(r.beta || 0) * dt * k;
+  if (Math.abs(air.dx) >= 1 || Math.abs(air.dy) >= 1){ acc.dx += air.dx; acc.dy += air.dy; air.dx = air.dy = 0; flush(); }
+}
+function airStart(btn, laser){
+  if (!("DeviceMotionEvent" in window)){ toast(t("airNo"), "bad"); return; }
+  air = {on: true, dx: 0, dy: 0, last: 0, laser}; btn.classList.add("on"); buzz(12);
+  window.addEventListener("devicemotion", airMotion);
+}
+function airStop(btn){
+  air.on = false; btn.classList.remove("on"); window.removeEventListener("devicemotion", airMotion);
+}
+for (const [id, laser] of [["airBtn", false], ["laserBtn", true]]){
+  const btn = $("#" + id);
+  btn.onpointerdown = e => { e.preventDefault(); btn.setPointerCapture(e.pointerId); airStart(btn, laser); };
+  btn.onpointerup = btn.onpointercancel = () => airStop(btn);
+}
 </script>
 </body>
 </html>

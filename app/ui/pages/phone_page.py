@@ -470,7 +470,7 @@ class AccessView(QWidget):
     CAPS = [("desktop", Icons.DESKTOP, "#A78BFA"), ("study", Icons.NOTES, "#34D399"),
             ("files", Icons.FOLDER, "#F59E0B"), ("screen", Icons.PREVIEW, "#22D3EE"),
             ("remote", Icons.KEYBOARD, "#F472B6"), ("clipboard", Icons.PASTE, "#60A5FA"),
-            ("sound", Icons.MUSIC, "#FB7185")]
+            ("sound", Icons.MUSIC, "#FB7185"), ("status", Icons.BELL, "#EF4444"), ("sync", Icons.SYNC, "#14B8A6")]
 
     def __init__(self, ctl, page):
         super().__init__()
@@ -558,6 +558,9 @@ class MirrorView(QWidget):
         row.addLayout(col, 1)
         self.go = primary_button(tr("mirror_show"), Icons.PLAY)
         self.go.clicked.connect(self._go)
+        self.shot_btn = button(tr("mirror_screenshot"), Icons.PREVIEW, role="Ghost")
+        self.shot_btn.clicked.connect(lambda: ctl.phone_hub.screenshot())
+        row.addWidget(self.shot_btn)
         row.addWidget(self.go)
         top.root.addLayout(row)
         self.status = label("", 8.8, role="Faint", wrap=True)
@@ -626,7 +629,8 @@ class MirrorView(QWidget):
         self.switches = {}
         for key, title, desc in (("audio", "mirror_audio", "mirror_audio_desc"),
                                  ("screen_off", "mirror_screen_off", "mirror_screen_off_desc"),
-                                 ("stay_awake", "mirror_stay_awake", ""), ("on_top", "mirror_on_top", "")):
+                                 ("stay_awake", "mirror_stay_awake", ""), ("on_top", "mirror_on_top", ""),
+                                 ("record", "mirror_record", "mirror_record_desc")):
             sw = ToggleSwitch(bool(o[key]))
             sw.toggled.connect(lambda on, k=key: self.mirror.save(**{k: on}))
             self.switches[key] = sw
@@ -767,32 +771,42 @@ class PhonePage(Page):
         }
         for tile in self.tiles.values():
             stats.addWidget(tile)
-        right.addLayout(stats)
-        self.tabs = SegmentedTabs([("received", Icons.INBOX, tr("tab_received")),
+        self.stats_row = QWidget()
+        self.stats_row.setLayout(stats)
+        stats.setContentsMargins(0, 0, 0, 0)
+        right.addWidget(self.stats_row)
+        self.tabs = SegmentedTabs([("home", Icons.HOME, tr("tab_phone_home")),
+                                   ("sync", Icons.SYNC, tr("tab_phone_sync")),
+                                   ("deck", Icons.VIEW_GRID, tr("tab_phone_deck")),
+                                   ("received", Icons.INBOX, tr("tab_received")),
                                    ("send", Icons.FORWARD, tr("tab_send")),
                                    ("devices", Icons.PHONE, tr("tab_devices")),
                                    ("access", Icons.SHIELD, tr("tab_phone_access")),
                                    ("mirror", Icons.PREVIEW, tr("tab_phone_mirror")),
-                                   ("options", Icons.SETTINGS, tr("tab_phone_settings"))], "received")
+                                   ("options", Icons.SETTINGS, tr("tab_phone_settings"))], "home")
         self.tabs.changed.connect(self.show_tab)
         tabs_row = QHBoxLayout()
         tabs_row.addWidget(self.tabs)
         tabs_row.addStretch(1)
         right.addLayout(tabs_row)
         self.stack = AnimatedStack()
-        self.views = {"received": ReceivedView(ctl, self), "send": SendView(ctl, self),
+        from app.ui.pages.phone_home import PhoneHome
+        from app.ui.pages.phone_sync_view import SyncView
+        from app.ui.pages.phone_deck_view import DeckView
+        self.views = {"home": PhoneHome(ctl, self), "sync": SyncView(ctl, self), "deck": DeckView(ctl, self), "received": ReceivedView(ctl, self), "send": SendView(ctl, self),
                       "devices": DevicesView(ctl, self), "access": AccessView(ctl, self),
                       "mirror": MirrorView(ctl, self),
                       "options": OptionsView(ctl, self)}
         for v in self.views.values():
             self.stack.addWidget(v)
         right.addWidget(self.stack, 1)
-        self.current = "received"
+        self.current = "home"
         body.addLayout(right, 1)
         root.addLayout(body, 1)
 
         self.listen(ctl.data_changed, self.refresh)
         self.refresh("phone")
+        self._layout_for("home")
 
     # --------------------------------------------------------------- actions
     def _toggle(self, on: bool) -> None:
@@ -804,6 +818,12 @@ class PhonePage(Page):
             self.current = key
             self.tabs.set_current(key)
             self.stack.switch_to(self.stack.indexOf(self.views[key]), animate=self.isVisible())
+            self._layout_for(key)
+
+    def _layout_for(self, key: str) -> None:
+        """Home is the dashboard (full width); the QR / address card and the counters belong to the other tabs."""
+        self.connect.setVisible(key not in ("home", "sync", "deck"))
+        self.stats_row.setVisible(key not in ("home", "sync", "deck"))
 
     def _choose(self, url: str) -> None:
         self._chosen_url = url
