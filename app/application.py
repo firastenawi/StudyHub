@@ -157,6 +157,18 @@ class StudyHubApp(QObject):
         self.phone_context: dict = {}  # … and on the phone (continue on the laptop)
         from app.core.phone_bridge import PhoneBridge
         self.phone_bridge = PhoneBridge(self)
+        from app.core.phone_hub import PhoneHub
+        self.phone_hub = PhoneHub(self)  # the phone's state, notifications and controls (Phone > Home)
+        from app.core.deck import Deck
+        self.deck = Deck(self)  # the phone's Deck of buttons (Phone > Deck)
+        try:
+            from app.core.power import mac_addresses
+            self.phone.macs = mac_addresses()
+        except Exception:
+            pass
+        from app.core.phone_sync import PhoneSync
+        self.phone_sync = PhoneSync(self)  # photo backup + synced folders with the phone
+        self.phone_sync._push_config()
         self.phone.request.connect(self.phone_bridge.handle)  # phone app: desktop, files, screen, notes...
         from app.core.phone_music import clear_folder
         clear_folder()  # music played from the phone last time
@@ -908,6 +920,10 @@ class StudyHubApp(QObject):
                 self.save_note(text, title, source="phone")
             self.notify(tr("phone_got_link", name=title or (title_from_target(url, "url") if url else text[:40])),
                         "success")
+        elif kind == "open":  # "Open on laptop" from the phone (share menu)
+            self.open_url(text)
+            self.notify(tr("handoff_opened", name=title or text[:60]), "success")
+            kind = "link"
         elif kind == "clip":
             QApplication.clipboard().setText(text)
             self.notify(tr("phone_got_clip"), "success")
@@ -920,10 +936,13 @@ class StudyHubApp(QObject):
         elif kind == "file":
             content, size = item["path"], item.get("size", 0)
             for_lab = item.get("lab") and getattr(self, "lab", None) and self.lab.active
-            if pin and not for_lab:  # a lab photo goes into the report, not onto the desktop
+            if item.get("camera"):  # asked for from Phone > Home: clipboard / scan window, not the desktop
+                self.phone_hub.camera_received(content, item["camera"])
+            elif pin and not for_lab:  # a lab photo goes into the report, not onto the desktop
                 self.add_path(content, notify=False)
-            self.notify(tr("lab_phone_photo_in") if for_lab else tr("phone_got_file", name=title), "success")
-        if getattr(self, "lab", None) and self.lab.active:  # during a lab: photos / notes from the phone join the report
+            if not item.get("camera"):
+                self.notify(tr("lab_phone_photo_in") if for_lab else tr("phone_got_file", name=title), "success")
+        if getattr(self, "lab", None) and self.lab.active and not item.get("camera"):  # during a lab: photos / notes join the report
             if kind == "file" and Path(item["path"]).suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"):
                 self.lab.add_file("phone_file", item["path"], caption=item.get("caption") or title)
             elif kind in ("note", "clip") and text.strip():
@@ -2632,6 +2651,7 @@ class StudyHubApp(QObject):
             (Icons.CHECKLIST, "lab_start", lambda: self.lab.start()),
             (Icons.OPEN_FOLDER, "pdf_open_task", lambda: self.open_pdf().choose_file()),
             (Icons.SEARCH, "pdf_library", lambda: self.open_pdf_library()),
+            (Icons.PHONE, "handoff_clipboard", lambda: self.phone_hub.open_on_phone(QApplication.clipboard().text())),
             (Icons.ADD, "add_to_hub", lambda: self.show_add_gallery()),
             (Icons.KEYBOARD, "app_terminal", lambda: self.open_terminal()),
             (Icons.PASTE, "snip_paste", lambda: self.snippet_popup().open()),

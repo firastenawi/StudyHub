@@ -46,7 +46,12 @@ MAX_TEXT = 100_000
 MAX_FAILS, BLOCK_SECONDS = 8, 300
 DISCOVERY_PORT = 48765          # the Android app asks "where is Study Hub?" here (UDP broadcast)
 DISCOVERY_ASK = b"STUDYHUB-DISCOVER 1"
-SECURE_ONLY = {"files", "screen", "remote", "clipboard", "sound"}
+SECURE_ONLY = {"files", "screen", "remote", "clipboard", "sound", "status", "sync"}
+XFER_CHUNK_MAX = 8 * 1024 * 1024    # one piece of a resumable upload
+XFER_TOTAL_MAX = 16 * 1024 ** 3     # a single file (videos)
+_XFER_ID = re.compile(r"[A-Za-z0-9_-]{8,80}")
+MAX_ICON = 96 * 1024          # a phone app's icon (PNG)
+COMMAND_WAIT = 25             # seconds the phone's command request is held open
 FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM = 0x2, 0x4
 
 
@@ -141,6 +146,40 @@ def unique_path(folder: Path, name: str) -> Path:
 
 def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _s(v, n: int) -> str:
+    return str(v if v is not None else "")[:n]
+
+
+def clean_state(d: dict) -> dict:
+    """Only the fields we show, with sane types (the phone is trusted after pairing, but still)."""
+    def num(k, lo=0, hi=100000):
+        try:
+            return max(lo, min(hi, int(d.get(k))))
+        except (TypeError, ValueError):
+            return None
+    out = {"model": _s(d.get("model"), 60), "android": _s(d.get("android"), 20), "app": _s(d.get("app"), 20),
+           "battery": num("battery", 0, 100), "charging": bool(d.get("charging")),
+           "net": _s(d.get("net"), 10), "wifi": bool(d.get("wifi")), "bt": bool(d.get("bt")),
+           "dnd": bool(d.get("dnd")), "ringer": _s(d.get("ringer"), 10), "torch": bool(d.get("torch")),
+           "volume": num("volume", 0, 100), "volume_max": num("volume_max", 1, 100),
+           "notif_access": bool(d.get("notif_access")), "dnd_access": bool(d.get("dnd_access")),
+           "type_access": bool(d.get("type_access")),
+           "media_access": bool(d.get("media_access", True)),
+           "at": time.time()}
+    return out
+
+
+def clean_notif(n: dict) -> dict:
+    actions = [_s(a, 40) for a in (n.get("actions") or [])[:4]]
+    try:
+        when = float(n.get("when") or 0) / 1000.0
+    except (TypeError, ValueError):
+        when = 0.0
+    return {"key": _s(n.get("key"), 300), "pkg": _s(n.get("pkg"), 150), "app": _s(n.get("app"), 80),
+            "title": _s(n.get("title"), 200), "text": _s(n.get("text"), 1500), "when": when or time.time(),
+            "reply": bool(n.get("reply")), "read": bool(n.get("read")), "actions": actions}
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -348,6 +387,40 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _app_get(self, path: str, device: str) -> None:
         q = self._query()
+        if path == "/api/deck":
+            if self._allowed("remote"):
+                self._reply(self._ask("deck", {}, device))
+            return
+        if path == "/api/sync/config":
+            if self._allowed("sync"):
+                with self.server.owner.lock:
+                    conf = dict(self.server.owner.sync_config)
+                self._json(200, conf)
+            return
+        if path == "/api/xfer":
+            if self._allowed("sync"):
+                xid = q.get("id", "")
+                if not _XFER_ID.fullmatch(xid):
+                    self._fail(400, "bad id")
+                    return
+                part = self._xfer_part(xid)
+                self._json(200, {"have": part.stat().st_size if part.exists() else 0})
+            return
+        if path == "/api/sync/file":
+            if self._allowed("sync"):
+                res = self._ask("sync_file", {"id": q.get("id", ""), "path": q.get("path", "")}, device)
+                if res is None:
+                    return
+                if not res.get("path"):
+                    self._json(404, {"error": "gone"})
+                    return
+                self._stream_file(Path(res["path"]))
+            return
+        if path == "/api/phone/commands":
+            if self._allowed("status"):
+                wait = max(0, min(COMMAND_WAIT, self._query_int("wait", COMMAND_WAIT)))
+                self._json(200, {"commands": self.server.owner.wait_commands(device, wait)})
+            return
         if path == "/api/desktop":
             if self._allowed("desktop"):
                 self._reply(self._ask("desktop", None, device))
@@ -464,6 +537,38 @@ class _Handler(BaseHTTPRequestHandler):
             HUB.unsubscribe(key)
 
     def _app_post(self, path: str, device: str) -> None:
+        if path == "/api/xfer":
+            if self._allowed("sync"):
+                self._xfer_put(device)
+            return
+        if path == "/api/deck/press":
+            if self._allowed("remote"):
+                data = self._read_json()
+                if data is not None:
+                    self._reply(self._ask("deck_press", data, device, timeout=15))
+            return
+        if path in ("/api/backup/check", "/api/backup/progress", "/api/sync/plan", "/api/sync/done", "/api/sync/linked"):
+            if self._allowed("sync"):
+                data = self._read_json()
+                if data is not None:
+                    self._reply(self._ask(path[5:].replace("/", "_"), data, device, timeout=60))
+            return
+        if path == "/api/open":  # handoff: a link from the phone opens on the laptop now
+            if self._allowed("status"):
+                data = self._read_json()
+                if data is None:
+                    return
+                url = str(data.get("url", "")).strip()[:2000]
+                if not re.match(r"https?://[^\s]+$", url):
+                    self._json(400, {"error": "url"})
+                    return
+                self.server.owner.received.emit({"kind": "open", "text": url, "title": _s(data.get("title"), 200),
+                                                 "device": device, "from": self.ip})
+                self._json(200, {"ok": True})
+            return
+        if path.startswith("/api/phone/"):
+            self._phone_post(path, device)
+            return
         if path == "/api/input":
             if not self._allowed("remote"):
                 return
@@ -662,9 +767,26 @@ class _Handler(BaseHTTPRequestHandler):
         ctype = (mimetypes.guess_type(path.name)[0] or "application/octet-stream") if inline else "application/octet-stream"
         if inline and not ctype.startswith(("image/", "text/plain", "application/pdf", "audio/", "video/")):
             ctype = "application/octet-stream"
-        self.send_response(200)
+        start, end = 0, size - 1  # "Range: bytes=N-" / "bytes=N-M": resume a dropped download
+        m = re.fullmatch(r"bytes=(\d+)-(\d*)", (self.headers.get("Range") or "").strip())
+        if m and size:
+            start = int(m.group(1))
+            end = min(int(m.group(2)), size - 1) if m.group(2) else size - 1
+            if start > end:
+                fh.close()
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return False
+            fh.seek(start)
+            self.send_response(206)
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        else:
+            self.send_response(200)
+        self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(size))
+        self.send_header("Content-Length", str(end - start + 1 if size else 0))
         self.send_header("Content-Disposition",
                          f"{'inline' if inline else 'attachment'}; filename*=UTF-8''{quote(path.name)}")
         self.send_header("Cache-Control", "no-store")
@@ -674,8 +796,10 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             with fh:
                 if self.command != "HEAD":
-                    while chunk := fh.read(65536):
+                    left = end - start + 1 if size else 0
+                    while left > 0 and (chunk := fh.read(min(65536, left))):
                         self.wfile.write(chunk)
+                        left -= len(chunk)
         except OSError:
             self.close_connection = True
             return False
@@ -754,6 +878,112 @@ class _Handler(BaseHTTPRequestHandler):
         owner.received.emit(item)  # queued to the GUI thread
         self._json(200, {"ok": True})
 
+    # ------------------------------------------------------- resumable uploads (photo backup, synced folders)
+    @staticmethod
+    def _xfer_part(xid: str) -> Path:
+        from app.core.phone_sync import XFER_DIR
+        XFER_DIR.mkdir(parents=True, exist_ok=True)
+        return XFER_DIR / f"{xid}.part"
+
+    def _xfer_put(self, device: str) -> None:
+        """One piece: ?id=&offset=&total= and the bytes. A piece that doesn't start where the file ends is
+        refused with what we have (409), so the phone carries on from there after a dropped connection."""
+        q = self._query()
+        xid = q.get("id", "")
+        try:
+            offset, total = int(q.get("offset", "-1")), int(q.get("total", "-1"))
+        except ValueError:
+            offset = total = -1
+        length = self._length()
+        if not _XFER_ID.fullmatch(xid) or offset < 0 or not 0 <= total <= XFER_TOTAL_MAX or not 0 <= length <= XFER_CHUNK_MAX \
+                or offset + length > total:
+            self._fail(400, "bad piece")
+            return
+        part = self._xfer_part(xid)
+        with self.server.lock:
+            have = part.stat().st_size if part.exists() else 0
+            if offset != have:
+                self.rfile.read(length) if length <= XFER_CHUNK_MAX else None
+                self._json(409, {"have": have})
+                return
+            remaining = length
+            with open(part, "ab") as fh:
+                while remaining > 0:
+                    chunk = self.rfile.read(min(65536, remaining))
+                    if not chunk:
+                        self.close_connection = True
+                        return
+                    fh.write(chunk)
+                    remaining -= len(chunk)
+            have = part.stat().st_size
+        if have < total:
+            self._json(200, {"have": have, "done": False})
+            return
+        try:
+            meta = json.loads(unquote(self.headers.get("X-Meta", "") or "{}"))
+        except ValueError:
+            meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        res = self._ask("xfer_done", {"part": str(part), "meta": meta}, device, timeout=300)
+        if res is None:
+            return
+        if res.get("error"):
+            part.unlink(missing_ok=True)
+            self._reply(res)
+            return
+        self._json(200, {"have": have, "done": True})
+
+    # ------------------------------------------------------- phone status (the Android app)
+    def _phone_post(self, path: str, device: str) -> None:
+        owner = self.server.owner
+        if not self._allowed("status"):
+            return
+        if path == "/api/phone/icon":
+            pkg = self._query().get("pkg", "")
+            length = self._length()
+            if not re.fullmatch(r"[A-Za-z0-9_.]{1,150}", pkg) or not 0 < length <= MAX_ICON:
+                self._fail(400, "bad icon")
+                return
+            data = self.rfile.read(length)
+            if not data.startswith(b"\x89PNG"):
+                self._fail(400, "bad icon")
+                return
+            from app.config import DATA_DIR
+            folder = Path(DATA_DIR) / "phone_icons"
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / f"{pkg}.png").write_bytes(data)
+            owner.phone_icon.emit(pkg)
+            self._json(200, {"ok": True})
+            return
+        data = self._read_json()
+        if data is None:
+            return
+        if path == "/api/phone/state":
+            owner.phone_status.emit(device, clean_state(data))
+        elif path == "/api/phone/notify":
+            op = data.get("op")
+            items = data.get("items")
+            if op not in ("post", "remove", "sync") or not isinstance(items, list):
+                self._json(400, {"error": "bad"})
+                return
+            owner.phone_notifs.emit(device, {"op": op, "items": [clean_notif(n) for n in items[:100] if isinstance(n, dict)]})
+        elif path == "/api/phone/apps":
+            items = data.get("items")
+            if not isinstance(items, list):
+                self._json(400, {"error": "bad"})
+                return
+            apps = [{"pkg": _s(a.get("pkg"), 150), "label": _s(a.get("label"), 80)} for a in items[:500]
+                    if isinstance(a, dict) and re.fullmatch(r"[A-Za-z0-9_.]{1,150}", str(a.get("pkg", "")))]
+            owner.phone_apps.emit(device, apps)
+        elif path == "/api/phone/result":
+            owner.phone_result.emit(device, {"id": int(data.get("id", 0) or 0), "ok": bool(data.get("ok")),
+                                             "error": str(data.get("error", ""))[:200]})
+        else:
+            self._json(404, {"error": "not found"})
+            return
+        self._json(200, {"ok": True})
+
     def _pair(self) -> None:
         owner = self.server.owner
         if self._blocked():
@@ -825,7 +1055,8 @@ class _Handler(BaseHTTPRequestHandler):
         caption = " ".join(unquote(self.headers.get("X-Caption", "")).split())[:300]
         owner.received.emit({"kind": "file", "path": str(target), "title": target.name, "size": length,
                              "subject_id": subject_id, "device": device, "from": self.ip,
-                             "caption": caption, "lab": self.headers.get("X-Lab") == "1"})
+                             "caption": caption, "lab": self.headers.get("X-Lab") == "1",
+                             "camera": self.headers.get("X-Camera") if self.headers.get("X-Camera") in ("photo", "scan") else ""})
         self._json(200, {"ok": True, "name": target.name})
 
     def _send_outbox_file(self, raw_id: str, device: str) -> None:
@@ -872,6 +1103,11 @@ class PhoneLinkServer(QObject):
     fetched = pyqtSignal(int, str)         # outbox id, token hash
     request = pyqtSignal(int, str, object, str)  # request id, kind, payload, token hash -> answer(id, result)
     share_downloaded = pyqtSignal(str, str)  # quick-share token, ip
+    phone_status = pyqtSignal(str, dict)   # token hash, the phone's state (battery, network, DND...)
+    phone_notifs = pyqtSignal(str, dict)   # token hash, {op: post|remove|sync, items}
+    phone_icon = pyqtSignal(str)           # package name whose icon arrived
+    phone_result = pyqtSignal(str, dict)   # token hash, {id, ok, error} for a command the laptop sent
+    phone_apps = pyqtSignal(str, list)     # token hash, [{pkg, label}] the phone's launcher apps
 
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
@@ -889,6 +1125,8 @@ class PhoneLinkServer(QObject):
         self.icons: dict[int, bytes] = {}
         self.caps: dict[str, bool] = {}    # phone app features switched on (Phone › Access)
         self.handoff: dict = {}            # what's open on the laptop (continue on the phone)
+        self.macs: list[str] = []          # this laptop's network cards (Wake-on-LAN from the phone app)
+        self.sync_config: dict = {}        # photo backup + synced folders, for the phone app (phone_sync.config)
         self.lab: dict = {}                # the lab being recorded ({"title": ...}) — the phone shows a camera button
         self.roots: list[dict] = []        # shared folders {name, path}
         self.events: list[dict] = []       # {seq, kind, text} for phone notifications (newest last)
@@ -897,6 +1135,10 @@ class PhoneLinkServer(QObject):
         self._req_seq = 0
         self._seen_at: dict[str, float] = {}
         self.shares: dict[str, dict] = {}  # quick share: token -> {path, name, expires, count}
+        self.commands: dict[str, list[dict]] = {}  # token hash -> commands waiting for that phone
+        self.command_cv = threading.Condition(self.lock)
+        self.polling: dict[str, float] = {}        # token hash -> when its command request last arrived
+        self._cmd_seq = 0
         self._httpd: _Server | None = None
         self._httpsd: _Server | None = None
         self._thread: threading.Thread | None = None
@@ -942,6 +1184,39 @@ class PhoneLinkServer(QObject):
         now = time.time()
         with self.lock:
             return sum(1 for v in self.shares.values() if v["expires"] > now)
+
+    # ---- commands for a phone (torch, DND, reply...): the phone holds a request open and gets them at once
+    def send_command(self, device: str, cmd: dict) -> int:
+        with self.command_cv:
+            self._cmd_seq += 1
+            item = {"id": self._cmd_seq, **cmd}
+            queue = self.commands.setdefault(device, [])
+            queue.append(item)
+            del queue[:-50]
+            self.command_cv.notify_all()
+        return item["id"]
+
+    def wait_commands(self, device: str, wait: float) -> list[dict]:
+        deadline = time.time() + wait
+        with self.command_cv:
+            self.polling[device] = time.time()
+            while not self.commands.get(device) and self._httpd is not None:
+                left = deadline - time.time()
+                if left <= 0:
+                    break
+                self.command_cv.wait(min(left, 1.0))
+            out = self.commands.pop(device, [])
+            self.polling[device] = time.time()
+        return out
+
+    def phone_online(self, device: str) -> bool:
+        """The phone app is connected right now (its command request came in the last 40 s)."""
+        with self.lock:
+            return time.time() - self.polling.get(device, 0) < COMMAND_WAIT + 15
+
+    def set_sync_config(self, conf: dict) -> None:
+        with self.lock:
+            self.sync_config = dict(conf)
 
     def set_lab(self, state: dict) -> None:
         with self.lock:
@@ -998,7 +1273,8 @@ class PhoneLinkServer(QObject):
         return slot["result"] if answered else None
 
     def info(self) -> dict:
-        return {"name": socket.gethostname(), "max_mb": self.max_mb, "lang": self.lang, "https_port": self.https_port}
+        return {"name": socket.gethostname(), "max_mb": self.max_mb, "lang": self.lang, "https_port": self.https_port,
+                "macs": self.macs}
 
     def mark_seen(self, digest: str, ip: str) -> None:
         now = time.monotonic()

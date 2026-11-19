@@ -20,7 +20,7 @@ from app.core.i18n import tr
 log = logging.getLogger(__name__)
 
 CAPS_DEFAULTS = {"desktop": True, "study": True, "files": False, "screen": False, "remote": False,
-                 "clipboard": False, "sound": False}
+                 "clipboard": False, "sound": False, "status": True, "sync": True}
 WATCH_NOTICE_SECONDS = 600  # tell the laptop user again after 10 minutes
 
 
@@ -59,6 +59,39 @@ class PhoneBridge:
             log.exception("phone request %s failed", kind)
             result = {"error": str(exc)[:200], "status": 500}
         self.ctl.phone.answer(req_id, result)
+
+    # ---------------------------------------------------------------- the Deck
+    def _deck(self, payload, device):
+        return self.ctl.deck.public()
+
+    def _deck_press(self, payload, device):
+        self._notice(device, "remote")
+        return self.ctl.deck.press(str((payload or {}).get("id", "")))
+
+    # ---------------------------------------------------------------- photo backup / synced folders
+    def _backup_check(self, payload, device):
+        items = payload.get("items") if isinstance(payload, dict) else None
+        return {"missing": self.ctl.phone_sync.backup_check(items if isinstance(items, list) else [])}
+
+    def _backup_progress(self, payload, device):
+        self.ctl.phone_sync.backup_progress(payload if isinstance(payload, dict) else {})
+        return {"ok": True}
+
+    def _xfer_done(self, payload, device):
+        return self.ctl.phone_sync.xfer_done(Path(payload["part"]), payload.get("meta") or {})
+
+    def _sync_plan(self, payload, device):
+        return self.ctl.phone_sync.sync_plan(payload)
+
+    def _sync_done(self, payload, device):
+        return self.ctl.phone_sync.sync_done(payload)
+
+    def _sync_linked(self, payload, device):
+        return self.ctl.phone_sync.sync_linked(payload)
+
+    def _sync_file(self, payload, device):
+        path = self.ctl.phone_sync.sync_file(str(payload.get("id", "")), str(payload.get("path", "")))
+        return {"path": str(path) if path else ""}
 
     def _device_name(self, device: str) -> str:
         return next((d["name"] for d in self.db.list_phone_devices() if d["token_hash"] == device), "📱")

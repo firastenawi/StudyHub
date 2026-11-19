@@ -76,7 +76,30 @@ def build_command(scrcpy: str, opts: dict) -> list[str]:
         cmd.append("--always-on-top")
     if opts.get("keyboard_uhid"):
         cmd.append("--keyboard=uhid")
+    if opts.get("record_to"):
+        cmd.append(f"--record={opts['record_to']}")
     return cmd
+
+
+def app_command(scrcpy: str, target: dict, pkg: str, title: str) -> list[str]:
+    """One phone app on its own virtual display, in its own window (scrcpy 3.0+)."""
+    cmd = [scrcpy, f"--window-title={title}", "--new-display", f"--start-app={pkg}", "--no-audio",
+           "--stay-awake", "--no-vd-destroy-content"]
+    if target.get("serial"):
+        cmd.append(f"--serial={target['serial']}")
+    elif target.get("usb"):
+        cmd.append("--select-usb")
+    return cmd
+
+
+def media_path(kind: str, ext: str) -> Path:
+    """A dated file name in Pictures/Study Hub (screenshots) or Videos/Study Hub (recordings)."""
+    from datetime import datetime
+    from PyQt6.QtCore import QStandardPaths
+    loc = QStandardPaths.StandardLocation.PicturesLocation if kind == "shot" else QStandardPaths.StandardLocation.MoviesLocation
+    folder = Path(QStandardPaths.writableLocation(loc)) / "Study Hub"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder / f"Phone {datetime.now():%Y-%m-%d %H-%M-%S}.{ext}"
 
 
 def run_adb(adb: str, *args: str, timeout: int = 20) -> tuple[bool, str]:
@@ -113,11 +136,12 @@ def install_with_winget() -> bool:
 
 # ---------------------------------------------------------------------------------------- controller
 import threading  # noqa: E402
+import time  # noqa: E402
 
 from PyQt6.QtCore import QObject, pyqtSignal  # noqa: E402
 
 DEFAULTS = {"mode": "wifi", "wifi_addr": "", "screen_off": False, "stay_awake": True, "audio": True,
-            "max_size": 0, "on_top": False, "path": ""}
+            "max_size": 0, "on_top": False, "path": "", "record": False}
 
 
 class Mirror(QObject):
@@ -125,12 +149,17 @@ class Mirror(QObject):
 
     message = pyqtSignal(str, str)     # text key or raw text, kind (success / error / info)
     changed = pyqtSignal()
+    app_window = pyqtSignal(int, str, str)  # window handle, package, title (an app window appeared)
+    shot = pyqtSignal(str)             # a screenshot was saved here
+    recorded = pyqtSignal(str)         # a screen recording was saved here
 
     def __init__(self, ctl):
         super().__init__(ctl)
         self.ctl = ctl
         self.proc: subprocess.Popen | None = None
         self.busy = False
+        self.apps: dict[str, subprocess.Popen] = {}  # package -> its own scrcpy window
+        self.recording = ""
 
     def options(self) -> dict:
         return {**DEFAULTS, **(self.ctl.db.get_setting("phone_mirror", {}) or {})}
@@ -179,6 +208,93 @@ class Mirror(QObject):
                               "success" if ok else "error")
         self._bg(work)
 
+    def target(self, adb: str, opts: dict) -> dict | None:
+        """How to reach the phone over ADB ({"serial": addr} or {"usb": True}); connects Wi-Fi first.
+        Runs on a worker thread; reports problems with message()."""
+        if opts["mode"] == "wifi":
+            addr = opts["wifi_addr"].strip()
+            if not valid_addr(addr):
+                self.message.emit("mirror_need_addr", "error")
+                return None
+            ok, out = run_adb(adb, "connect", addr, timeout=15)
+            if not ok or "connected" not in out.lower():
+                self.message.emit(out.splitlines()[-1] if out else "mirror_failed", "error")
+                return None
+            return {"serial": addr}
+        return {"usb": True}
+
+    @staticmethod
+    def adb_args(target: dict) -> list[str]:
+        return ["-s", target["serial"]] if target.get("serial") else ["-d"]
+
+    # ---------------------------------------------------------------- one phone app in its own window
+    def open_app(self, pkg: str, title: str) -> None:
+        proc = self.apps.get(pkg)
+        if proc is not None and proc.poll() is None:
+            from app.core import winapi
+            for hwnd in winapi.windows_of(proc.pid):
+                winapi.bring_to_front(hwnd)
+            return
+        scrcpy = self.scrcpy()
+        if not scrcpy:
+            self.message.emit("mirror_no_scrcpy", "error")
+            return
+        opts = self.options()
+
+        def work():
+            target = self.target(adb_for(scrcpy), opts)
+            if target is None:
+                return
+            proc = subprocess.Popen(app_command(scrcpy, target, pkg, title), stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True, errors="replace",
+                                    creationflags=CREATE_NO_WINDOW)
+            self.apps[pkg] = proc
+            from app.core import winapi
+            for _ in range(80):  # its window: give it our taskbar identity and the app's icon
+                if proc.poll() is not None:
+                    break
+                found = winapi.windows_of(proc.pid)
+                if found:
+                    self.app_window.emit(found[0], pkg, title)
+                    break
+                time.sleep(0.25)
+            tail: list[str] = []
+            for line in proc.stdout:
+                tail = (tail + [line.strip()])[-6:]
+            code = proc.wait()
+            self.apps.pop(pkg, None)
+            if code not in (0, 2):
+                err = next((l for l in reversed(tail) if "ERROR" in l), tail[-1] if tail else "")
+                self.message.emit(err.replace("ERROR:", "").strip() or "mirror_failed", "error")
+        threading.Thread(target=work, name=f"phone-app-{pkg}", daemon=True).start()
+
+    # ---------------------------------------------------------------- screenshot
+    def screenshot(self) -> None:
+        scrcpy = self.scrcpy()
+        if not scrcpy:
+            self.message.emit("mirror_no_scrcpy", "error")
+            return
+        opts = self.options()
+
+        def work():
+            adb = adb_for(scrcpy)
+            target = self.target(adb, opts)
+            if target is None:
+                return
+            try:
+                r = subprocess.run([adb, *self.adb_args(target), "exec-out", "screencap", "-p"], capture_output=True,
+                                   timeout=20, creationflags=CREATE_NO_WINDOW)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                self.message.emit(str(exc), "error")
+                return
+            if not r.stdout.startswith(b"\x89PNG"):
+                self.message.emit("mirror_shot_failed", "error")
+                return
+            path = media_path("shot", "png")
+            path.write_bytes(r.stdout)
+            self.shot.emit(str(path))
+        threading.Thread(target=work, name="phone-shot", daemon=True).start()
+
     def start(self) -> None:
         if self.running:
             self.message.emit("mirror_already", "info")
@@ -191,19 +307,14 @@ class Mirror(QObject):
 
         def work():
             adb = adb_for(scrcpy)
-            run_opts = dict(opts)
-            if opts["mode"] == "wifi":
-                addr = opts["wifi_addr"].strip()
-                if not valid_addr(addr):
-                    self.message.emit("mirror_need_addr", "error")
-                    return
-                ok, out = run_adb(adb, "connect", addr, timeout=15)
-                if not ok or "connected" not in out.lower():
-                    self.message.emit(out.splitlines()[-1] if out else "mirror_failed", "error")
-                    return
-                run_opts["serial"] = addr
-            else:
-                run_opts["usb"] = True
+            target = self.target(adb, opts)
+            if target is None:
+                return
+            run_opts = {**opts, **target}
+            self.recording = ""
+            if opts.get("record"):
+                self.recording = str(media_path("video", "mp4"))
+                run_opts["record_to"] = self.recording
             self.message.emit("mirror_starting", "info")
             self.proc = subprocess.Popen(build_command(scrcpy, run_opts), stdout=subprocess.PIPE,
                                          stderr=subprocess.STDOUT, text=True, errors="replace",
@@ -215,6 +326,8 @@ class Mirror(QObject):
                 tail = (tail + [line.strip()])[-6:]
             code = self.proc.wait()
             self.changed.emit()
+            if self.recording and Path(self.recording).is_file():
+                self.recorded.emit(self.recording)
             if code not in (0, 2):  # 2 = the phone disconnected
                 err = next((l for l in reversed(tail) if "ERROR" in l), tail[-1] if tail else "")
                 self.message.emit(err.replace("ERROR:", "").strip() or "mirror_failed", "error")

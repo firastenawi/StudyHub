@@ -101,7 +101,7 @@ def set_window_app_id(widget, app_id: str, relaunch_command: str = "", display_n
     """Gives one window its own taskbar button (own icon, own group, pinnable) instead of the process' one.
     The relaunch values make a pinned button start this same app again (e.g. StudyHub.exe --app notes)."""
     try:
-        hwnd = int(widget.winId())
+        hwnd = widget if isinstance(widget, int) else int(widget.winId())  # also another program's window
         store = ctypes.c_void_p()
         iid = _GUID.parse(_IID_IPROPERTYSTORE)
         if shell32.SHGetPropertyStoreForWindow(wintypes.HWND(hwnd), ctypes.byref(iid), ctypes.byref(store)) != 0:
@@ -225,3 +225,45 @@ def shell_execute(target: str, args: str = "", workdir: str | None = None,
     """Opens a program / file / folder / URL like a double click. verb='runas' = admin."""
     result = shell32.ShellExecuteW(None, verb, target, args or None, workdir, SW_SHOWNORMAL)
     return (result or 0) > 32
+
+
+# ---------------------------------------------------------------- other programs' windows (phone app windows)
+_WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+_kept_icons: list = []  # HICONs given to other windows must stay alive
+
+
+def windows_of(pid: int) -> list[int]:
+    """Visible top-level windows of a process."""
+    found: list[int] = []
+
+    def cb(hwnd, _):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value == pid and user32.IsWindowVisible(hwnd) and user32.GetWindowTextLengthW(hwnd) > 0:
+            found.append(int(hwnd))
+        return True
+    user32.EnumWindows(_WNDENUMPROC(cb), 0)
+    return found
+
+
+def bring_to_front(hwnd: int) -> None:
+    if user32.IsIconic(wintypes.HWND(hwnd)):
+        user32.ShowWindow(wintypes.HWND(hwnd), 9)  # SW_RESTORE
+    user32.SetForegroundWindow(wintypes.HWND(hwnd))
+
+
+def set_window_icon(hwnd: int, image) -> bool:
+    """Sets another window's title-bar / taskbar icon from a QImage."""
+    try:
+        hicon = image.toHICON()
+    except Exception:
+        return False
+    if not hicon:
+        return False
+    hicon = int(hicon)  # sip.voidptr -> handle value
+    _kept_icons.append(hicon)
+    del _kept_icons[:-64]
+    for which in (0, 1):  # ICON_SMALL, ICON_BIG
+        user32.SendMessageW(wintypes.HWND(hwnd), wintypes.UINT(0x0080), wintypes.WPARAM(which),
+                            wintypes.LPARAM(hicon))  # WM_SETICON
+    return True
