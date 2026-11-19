@@ -18,10 +18,16 @@ if (-not (Test-Path (Join-Path $src $exeName))) { throw "$exeName not found next
 # 1. close the running copy (asks it politely through its pipe, then waits)
 $closer = if (Test-Path (Join-Path $Dest $exeName)) { Join-Path $Dest $exeName } else { Join-Path $src $exeName }
 Start-Process -FilePath $closer -ArgumentList "--quit" -Wait
+function Test-Running { [bool](Get-Process StudyHub -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$Dest*" }) }
 $deadline = (Get-Date).AddSeconds(15)
-while ((Get-Process StudyHub -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$Dest*" }) -and (Get-Date) -lt $deadline) {
-    Start-Sleep -Milliseconds 300
+while ((Test-Running) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 300 }
+if (Test-Running) {  # busy (a dialog open, saving...): ask once more and give it longer
+    Start-Process -FilePath $closer -ArgumentList "--quit" -Wait
+    $deadline = (Get-Date).AddSeconds(30)
+    while ((Test-Running) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
 }
+# never copy over a running copy: that would leave old and new files mixed
+if (Test-Running) { throw "Study Hub is still open. Close it (tray icon > Quit) and run the installer again." }
 
 # 2. copy the files (mirror: removes files a previous version had and this one doesn't)
 if ((Resolve-Path $src).Path.TrimEnd('\') -ne [IO.Path]::GetFullPath($Dest).TrimEnd('\')) {

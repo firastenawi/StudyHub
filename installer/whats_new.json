@@ -1,4 +1,4 @@
 {
- "en": "Fix: Apply and Reset in Settings › Taskbar now work (the button applied the wrong section before).",
- "ar": "تصليح: «تطبيق» و«رجّعه» بالإعدادات › الشريط صاروا يشتغلوا (قبل كان الزر يطبّق القسم الغلط)."
+ "en": "The phone's Deck: a grid of buttons for the laptop (media and live volume, shortcuts, apps, Study Hub commands, OBS Studio recording and scenes, lock / sleep / screen off). Set it up in Phone › Deck. Also: air mouse and a laser pointer for slides, and Wake laptop in the phone app. Update the phone app to 1.7.0.",
+ "ar": "أزرار الموبايل: شبكة أزرار للابتوب (الوسائط والصوت مباشرة، اختصارات، تطبيقات، أوامر Study Hub، تسجيل ومشاهد OBS Studio، قفل / سكون / طفي الشاشة). جهّزها من الموبايل › الأزرار. وكمان: ماوس بالحركة وليزر للعروض، وتصحية اللابتوب من تطبيق الموبايل. حدّث تطبيق الموبايل لـ 1.7.0."
 }

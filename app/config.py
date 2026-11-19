@@ -13,7 +13,7 @@ from pathlib import Path
 APP_NAME = "Study Hub"
 APP_ID = "StudyHub"
 APP_USER_MODEL_ID = "StudyHub.Desktop.App"
-VERSION = "1.9.0"
+VERSION = "2.4.0"
 IS_FROZEN = getattr(sys, "frozen", False)  # True inside the PyInstaller-built StudyHub.exe
 
 # Project root (folder that contains main.py) — or the exe's folder in the packaged app
